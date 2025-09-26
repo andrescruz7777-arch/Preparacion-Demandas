@@ -53,9 +53,9 @@ def detectar_tipo(nombre_archivo: str):
         return "PAGARE"
     elif "UBICA" in nombre:
         return "UBICA"
-    elif ("CAMARA" in nombre or "COMERCIO" in nombre) or ("CERTIFICADO" in nombre and "CAMARA" in nombre):
+    elif "CAMARA" in nombre or "COMERCIO" in nombre:
         return "CAMARA Y COMERCIO"
-    elif "SUPERFINANCIERA" in nombre or ("CERTIFICADO" in nombre and "EXISTENCIA" in nombre):
+    elif "SUPERFINANCIERA" in nombre:
         return "SUPERFINANCIERA"
     elif "SIRNA" in nombre:
         return "SIRNA"
@@ -63,6 +63,10 @@ def detectar_tipo(nombre_archivo: str):
         return "MEDIDAS"
     else:
         return None
+
+def es_cedula(valor):
+    """Verifica si el string arranca con números (cédula)"""
+    return valor.strip().split("_")[0].isdigit()
 
 # ------------------------
 # CARGA DE ARCHIVOS
@@ -72,24 +76,29 @@ uploaded_files = st.file_uploader("📂 Sube todos los documentos (PDFs)", type=
 if uploaded_files:
     st.success(f"✅ Se cargaron {len(uploaded_files)} archivos")
 
-    # Agrupar documentos por cédula
     clientes = {}
+    documentos_fijos = {}
+
+    # Separar fijos y variables
     for file in uploaded_files:
         filename = file.name
-        parts = filename.split("_")
-        if len(parts) < 2:
-            continue  # ignorar archivos mal nombrados
-        cedula = parts[0].strip()
-        nombre_cliente = parts[1].strip() if len(parts) > 1 else "SIN_NOMBRE"
-        tipo_doc = detectar_tipo(filename)
+        if es_cedula(filename):  # Documento de cliente
+            parts = filename.split("_")
+            cedula = parts[0].strip()
+            nombre_cliente = parts[1].strip() if len(parts) > 1 else "SIN_NOMBRE"
+            tipo_doc = detectar_tipo(filename)
 
-        if cedula not in clientes:
-            clientes[cedula] = {
-                "nombre": nombre_cliente,
-                "docs": {}
-            }
-        if tipo_doc:
-            clientes[cedula]["docs"][tipo_doc] = file
+            if cedula not in clientes:
+                clientes[cedula] = {
+                    "nombre": nombre_cliente,
+                    "docs": {}
+                }
+            if tipo_doc:
+                clientes[cedula]["docs"][tipo_doc] = file
+        else:  # Documento fijo
+            tipo_doc = detectar_tipo(filename)
+            if tipo_doc:
+                documentos_fijos[tipo_doc] = file
 
     # Crear Excel de trazabilidad global
     data_excel = []
@@ -101,6 +110,8 @@ if uploaded_files:
         for tipo, orden in DOCUMENT_ORDER.items():
             if tipo in info["docs"]:
                 fila[tipo] = info["docs"][tipo].name
+            elif tipo in documentos_fijos:  # hereda los fijos
+                fila[tipo] = documentos_fijos[tipo].name
             else:
                 fila[tipo] = "NO SE APORTÓ"
         data_excel.append(fila)
@@ -120,11 +131,17 @@ if uploaded_files:
             for tipo, archivo in info["docs"].items():
                 zipf.writestr(os_path + archivo.name, archivo.getvalue())
 
+            # Agregar también los fijos a cada carpeta
+            for tipo, archivo in documentos_fijos.items():
+                zipf.writestr(os_path + archivo.name, archivo.getvalue())
+
             # Crear unificado
             merger = PdfMerger()
             for tipo, orden in sorted(DOCUMENT_ORDER.items(), key=lambda x: x[1]):
                 if tipo in info["docs"]:
                     merger.append(io.BytesIO(info["docs"][tipo].getvalue()))
+                elif tipo in documentos_fijos:
+                    merger.append(io.BytesIO(documentos_fijos[tipo].getvalue()))
             unificado_bytes = io.BytesIO()
             merger.write(unificado_bytes)
             merger.close()
