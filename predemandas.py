@@ -47,13 +47,13 @@ def detectar_tipo(nombre_archivo: str):
         return "DEMANDA"
     elif "REMISION" in nombre and "PODER" in nombre:
         return "REMISION DEL PODER"
-    elif "PODER" in nombre:
+    elif "PODER" in nombre and "REMISION" not in nombre:
         return "PODER"
     elif "PAGARE" in nombre:
         return "PAGARE"
     elif "UBICA" in nombre:
         return "UBICA"
-    elif "CAMARA" in nombre or "COMERCIO" in nombre:
+    elif "CAMARA_COMERCIO" in nombre or "CAMARA" in nombre or "COMERCIO" in nombre:
         return "CAMARA Y COMERCIO"
     elif "SUPERFINANCIERA" in nombre:
         return "SUPERFINANCIERA"
