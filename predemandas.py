@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import io
 import zipfile
+import unicodedata
 from PyPDF2 import PdfMerger
 
 # ------------------------
@@ -31,10 +32,17 @@ DOCUMENT_ORDER = {
 }
 
 # ------------------------
-# FUNCIÓN: DETECTAR TIPO DE DOCUMENTO
+# FUNCIONES AUXILIARES
 # ------------------------
+def limpiar_texto(texto):
+    """Quita tildes y pasa a mayúsculas"""
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
+    ).upper()
+
 def detectar_tipo(nombre_archivo: str):
-    nombre = nombre_archivo.upper()
+    nombre = limpiar_texto(nombre_archivo)
     if "DEMANDA" in nombre:
         return "DEMANDA"
     elif "REMISION" in nombre and "PODER" in nombre:
@@ -45,9 +53,9 @@ def detectar_tipo(nombre_archivo: str):
         return "PAGARE"
     elif "UBICA" in nombre:
         return "UBICA"
-    elif "CAMARA" in nombre or "COMERCIO" in nombre:
+    elif ("CAMARA" in nombre or "COMERCIO" in nombre) or ("CERTIFICADO" in nombre and "CAMARA" in nombre):
         return "CAMARA Y COMERCIO"
-    elif "SUPERFINANCIERA" in nombre:
+    elif "SUPERFINANCIERA" in nombre or ("CERTIFICADO" in nombre and "EXISTENCIA" in nombre):
         return "SUPERFINANCIERA"
     elif "SIRNA" in nombre:
         return "SIRNA"
