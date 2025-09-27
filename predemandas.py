@@ -172,7 +172,7 @@ if uploaded_files:
 # ------------------------
 # FASE 2: ENVÍO REAL
 # ------------------------
-st.subheader("📧 Enviar demandas (prueba - solo a tu correo corporativo + copia a Yamile)")
+st.subheader("📧 Enviar demandas (prueba + copia a Yamile)")
 
 base_excel = st.file_uploader("📂 Sube la base de juzgados (Excel)", type=["xlsx"])
 
