@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import os
 import io
 import zipfile
+import tempfile
 import unicodedata
 from PyPDF2 import PdfMerger, PdfReader
 import smtplib
@@ -15,11 +15,6 @@ from email.mime.text import MIMEText
 # ------------------------
 st.set_page_config(page_title="📄 Preparación de Demanda Judicial COS", layout="wide")
 st.title("📄 Preparación de Demanda Judicial - COS ⚖️")
-st.markdown("""
-Esta herramienta permite **unificar documentos de demanda** en un único PDF por cliente, 
-organizar los archivos en carpetas y luego **enviar automáticamente las demandas por correo** 
-según la base de juzgados.
-""")
 
 # ------------------------
 # ORDEN MAESTRO
@@ -44,7 +39,6 @@ SMTP_PORT = int(st.secrets["SMTP_PORT"])
 USER = st.secrets["USER"]
 PASSWORD = st.secrets["PASSWORD"]
 
-# Copias fijas
 CC_LIST = ["yamile.fonseca@contactosolutions.com"]
 
 # ------------------------
@@ -92,8 +86,10 @@ def desencriptar_pdf(file_bytes):
     return reader
 
 # ------------------------
-# FASE 1: PDFs -> ZIP + Excel
+# FASE 1: PREPARAR DEMANDAS
 # ------------------------
+st.header("📝 Fase 1: Preparación de demandas")
+
 uploaded_files = st.file_uploader("📂 Sube todos los documentos (PDFs)", type="pdf", accept_multiple_files=True)
 
 clientes = {}
@@ -137,59 +133,79 @@ if uploaded_files:
     st.subheader("📊 Vista previa del Excel Global")
     st.dataframe(df)
 
-    # ZIP
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zipf:
-        for cedula, info in clientes.items():
-            carpeta_cliente = f"{cedula}_{info['nombre']}"
-            os_path = f"{carpeta_cliente}/"
+    # Selector de tamaño de lote
+    lote_size = st.selectbox("Procesar en lotes de:", [10, 25, 50], index=1)
 
-            for tipo, archivo in info["docs"].items():
-                zipf.writestr(os_path + archivo.name, archivo.getvalue())
+    clientes_items = list(clientes.items())
+    total_clientes = len(clientes_items)
+    lotes = [clientes_items[i:i + lote_size] for i in range(0, total_clientes, lote_size)]
 
-            for tipo, archivo in documentos_fijos.items():
-                zipf.writestr(os_path + archivo.name, archivo.getvalue())
+    # Generar un ZIP por cada lote
+    for idx, lote in enumerate(lotes, start=1):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_zip:
+            with zipfile.ZipFile(tmp_zip, "w") as zipf:
+                for cedula, info in lote:
+                    carpeta_cliente = f"{cedula}_{info['nombre']}"
+                    os_path = f"{carpeta_cliente}/"
 
-            merger = PdfMerger()
-            for tipo, orden in sorted(DOCUMENT_ORDER.items(), key=lambda x: x[1]):
-                if tipo in info["docs"]:
-                    merger.append(desencriptar_pdf(io.BytesIO(info["docs"][tipo].getvalue())))
-                elif tipo in documentos_fijos:
-                    merger.append(desencriptar_pdf(io.BytesIO(documentos_fijos[tipo].getvalue())))
-            unificado_bytes = io.BytesIO()
-            merger.write(unificado_bytes)
-            merger.close()
-            unificado_bytes.seek(0)
-            nombre_unificado = f"{cedula}_{info['nombre']}_DEMANDAUNIFICADA.pdf"
-            zipf.writestr(os_path + nombre_unificado, unificado_bytes.read())
+                    # Guardar documentos individuales (SOLO variables)
+                    for tipo, archivo in info["docs"].items():
+                        zipf.writestr(os_path + archivo.name, archivo.getvalue())
 
-    # Descargas
-    st.download_button("📥 Descargar Carpeta ZIP con demandas", zip_buffer.getvalue(), "Demandas_Unificadas.zip", "application/zip")
+                    # Crear PDF unificado (variables + fijos)
+                    merger = PdfMerger()
+                    for tipo, orden in sorted(DOCUMENT_ORDER.items(), key=lambda x: x[1]):
+                        if tipo in info["docs"]:
+                            merger.append(io.BytesIO(info["docs"][tipo].getvalue()))
+                        elif tipo in documentos_fijos:
+                            merger.append(io.BytesIO(documentos_fijos[tipo].getvalue()))
+
+                    unificado_bytes = io.BytesIO()
+                    merger.write(unificado_bytes)
+                    merger.close()
+                    unificado_bytes.seek(0)
+                    nombre_unificado = f"{cedula}_{info['nombre']}_DEMANDAUNIFICADA.pdf"
+                    zipf.writestr(os_path + nombre_unificado, unificado_bytes.read())
+
+            with open(tmp_zip.name, "rb") as f:
+                zip_data = f.read()
+
+        st.download_button(
+            f"📥 Descargar ZIP - Lote {idx} ({len(lote)} clientes)",
+            data=zip_data,
+            file_name=f"Demandas_Lote{idx}.zip",
+            mime="application/zip"
+        )
+
+    # Descargar Excel global
     excel_buffer = io.BytesIO()
     df.to_excel(excel_buffer, index=False)
     st.download_button("📊 Descargar Excel Global", excel_buffer.getvalue(), "Trazabilidad_Demandas.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ------------------------
-# FASE 2: ENVÍO REAL
+# FASE 2: ENVÍO DE DEMANDAS
 # ------------------------
-st.subheader("📧 Enviar demandas (prueba + copia a Equipo Juridico)")
+st.header("📧 Fase 2: Envío de demandas")
 
+zip_uploaded = st.file_uploader("📂 Sube el ZIP con demandas unificadas", type=["zip"])
 base_excel = st.file_uploader("📂 Sube la base de juzgados (Excel)", type=["xlsx"])
 
-if base_excel and df is not None:
+if zip_uploaded and base_excel:
     base = pd.read_excel(base_excel)
     base.columns = [c.strip().upper().replace(" ", "_") for c in base.columns]
 
     if st.button("🚀 Enviar correos"):
         log_envios = []
-        for _, row in base.iterrows():
-            cedula = str(row["CC_DDO"]).strip()
-            nombre = row["NOMBRE_DDO"].strip()
-            juzgado = row["JUZGADO"].strip()
-            cuantia = row["CUANTÍA"].strip() if "CUANTÍA" in row else row["CUANTIA"].strip()
 
-            asunto = f"RADICACIÓN DEMANDA EJECUTIVA DTE: BANCO GNB SUDAMERIS S.A CONTRA {nombre} CC {cedula}"
-            cuerpo = f"""Señor
+        with zipfile.ZipFile(zip_uploaded, "r") as zf:
+            for _, row in base.iterrows():
+                cedula = str(row["CC_DDO"]).strip()
+                nombre = row["NOMBRE_DDO"].strip()
+                juzgado = row["JUZGADO"].strip()
+                cuantia = row["CUANTÍA"].strip() if "CUANTÍA" in row else row["CUANTIA"].strip()
+
+                asunto = f"RADICACIÓN DEMANDA EJECUTIVA DTE: BANCO GNB SUDAMERIS S.A CONTRA {nombre} CC {cedula}"
+                cuerpo = f"""Señor
 {juzgado}
 {USER}
 E. S. D.
@@ -210,51 +226,52 @@ ADRIANA PAOLA HERNANDEZ ACEVEDO
 C.C. No. 1022371176
 T. P. No. 248.374 del C. S. de la J"""
 
-            msg = MIMEMultipart()
-            msg["From"] = USER
-            msg["To"] = USER   # En esta fase de prueba, solo a tu correo
-            msg["Cc"] = ", ".join(CC_LIST)
-            msg["Subject"] = asunto
-            msg.attach(MIMEText(cuerpo, "plain"))
+                msg = MIMEMultipart()
+                msg["From"] = USER
+                msg["To"] = USER  # en pruebas se manda solo a tu correo
+                msg["Cc"] = ", ".join(CC_LIST)
+                msg["Subject"] = asunto
+                msg.attach(MIMEText(cuerpo, "plain"))
 
-            # Adjuntar PDF unificado
-            pdf_name = f"{cedula}_{nombre}_DEMANDAUNIFICADA.pdf"
-            if cedula in clientes:
-                merger = PdfMerger()
-                for tipo, orden in sorted(DOCUMENT_ORDER.items(), key=lambda x: x[1]):
-                    if tipo in clientes[cedula]["docs"]:
-                        merger.append(desencriptar_pdf(io.BytesIO(clientes[cedula]["docs"][tipo].getvalue())))
-                    elif tipo in documentos_fijos:
-                        merger.append(desencriptar_pdf(io.BytesIO(documentos_fijos[tipo].getvalue())))
-                pdf_bytes = io.BytesIO()
-                merger.write(pdf_bytes)
-                merger.close()
-                pdf_bytes.seek(0)
-                part = MIMEApplication(pdf_bytes.read(), Name=pdf_name)
-                part["Content-Disposition"] = f'attachment; filename="{pdf_name}"'
-                msg.attach(part)
+                pdf_name = f"{cedula}_{nombre}_DEMANDAUNIFICADA.pdf"
+                pdf_path = None
+                for file in zf.namelist():
+                    if pdf_name in file:
+                        pdf_path = file
+                        break
 
-            try:
-                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                    server.starttls()
-                    server.login(USER, PASSWORD)
-                    recipients = [USER] + CC_LIST
-                    server.sendmail(USER, recipients, msg.as_string())
-                    estado = "ENVIADO ✅"
-            except Exception as e:
-                estado = f"ERROR ❌ {str(e)}"
+                if pdf_path:
+                    pdf_bytes = zf.read(pdf_path)
+                    part = MIMEApplication(pdf_bytes, Name=pdf_name)
+                    part["Content-Disposition"] = f'attachment; filename="{pdf_name}"'
+                    msg.attach(part)
+                    try:
+                        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                            server.starttls()
+                            server.login(USER, PASSWORD)
+                            recipients = [USER] + CC_LIST
+                            server.sendmail(USER, recipients, msg.as_string())
+                            estado = "ENVIADO ✅"
+                    except Exception as e:
+                        estado = f"ERROR ❌ {str(e)}"
+                else:
+                    estado = "NO SE ENCONTRÓ EL PDF ❌"
 
-            log_envios.append({
-                "CEDULA": cedula,
-                "NOMBRE_CLIENTE": nombre,
-                "ASUNTO": asunto,
-                "ESTADO": estado
-            })
+                log_envios.append({
+                    "CEDULA": cedula,
+                    "NOMBRE_CLIENTE": nombre,
+                    "ASUNTO": asunto,
+                    "ESTADO": estado
+                })
 
         log_df = pd.DataFrame(log_envios)
         st.subheader("📊 Log de envíos")
         st.dataframe(log_df)
 
+        # Descargar log
+        log_buffer = io.BytesIO()
+        log_df.to_excel(log_buffer, index=False)
+        st.download_button("📊 Descargar Log de Envíos", log_buffer.getvalue(), "Log_Envios.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         # Descargar log
         log_buffer = io.BytesIO()
         log_df.to_excel(log_buffer, index=False)
