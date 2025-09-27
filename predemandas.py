@@ -174,13 +174,20 @@ if uploaded_files:
             f"📥 Descargar ZIP - Lote {idx} ({len(lote)} clientes)",
             data=zip_data,
             file_name=f"Demandas_Lote{idx}.zip",
-            mime="application/zip"
+            mime="application/zip",
+            key=f"zip_lote_{idx}"
         )
 
     # Descargar Excel global
     excel_buffer = io.BytesIO()
     df.to_excel(excel_buffer, index=False)
-    st.download_button("📊 Descargar Excel Global", excel_buffer.getvalue(), "Trazabilidad_Demandas.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button(
+        "📊 Descargar Excel Global",
+        excel_buffer.getvalue(),
+        "Trazabilidad_Demandas.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="descargar_excel_global"
+    )
 
 # ------------------------
 # FASE 2: ENVÍO DE DEMANDAS
@@ -271,8 +278,10 @@ T. P. No. 248.374 del C. S. de la J"""
         # Descargar log
         log_buffer = io.BytesIO()
         log_df.to_excel(log_buffer, index=False)
-        st.download_button("📊 Descargar Log de Envíos", log_buffer.getvalue(), "Log_Envios.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        # Descargar log
-        log_buffer = io.BytesIO()
-        log_df.to_excel(log_buffer, index=False)
-        st.download_button("📊 Descargar Log de Envíos", log_buffer.getvalue(), "Log_Envios.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "📊 Descargar Log de Envíos",
+            log_buffer.getvalue(),
+            "Log_Envios.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="descargar_log_envios"
+        )
