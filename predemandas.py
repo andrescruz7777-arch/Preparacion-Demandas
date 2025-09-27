@@ -188,6 +188,7 @@ if uploaded_files:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="descargar_excel_global"
     )
+import time
 
 # ------------------------
 # FASE 2: ENVÍO DE DEMANDAS
@@ -203,9 +204,15 @@ if zip_uploaded and base_excel:
 
     if st.button("🚀 Enviar correos"):
         log_envios = []
+        total = len(base)
+        enviados = 0
+        lote_size = 15
+        pausa = 120  # 2 minutos (en segundos)
+
+        progress_bar = st.progress(0, text="Iniciando envío...")
 
         with zipfile.ZipFile(zip_uploaded, "r") as zf:
-            for _, row in base.iterrows():
+            for idx, (_, row) in enumerate(base.iterrows(), start=1):
                 cedula = str(row["CC_DDO"]).strip()
                 nombre = row["NOMBRE_DDO"].strip()
                 juzgado = row["JUZGADO"].strip()
@@ -270,6 +277,14 @@ T. P. No. 248.374 del C. S. de la J"""
                     "ASUNTO": asunto,
                     "ESTADO": estado
                 })
+
+                enviados += 1
+                progress_bar.progress(enviados/total, text=f"Enviados {enviados}/{total}")
+
+                # Pausa cada lote de 15
+                if idx % lote_size == 0 and idx < total:
+                    st.info(f"⏳ Pausa de {pausa//60} minutos antes de continuar (lote {idx//lote_size})...")
+                    time.sleep(pausa)
 
         log_df = pd.DataFrame(log_envios)
         st.subheader("📊 Log de envíos")
