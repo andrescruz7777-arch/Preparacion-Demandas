@@ -9,6 +9,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from email.mime.text import MIMEText
+import time
 
 # ------------------------
 # CONFIG STREAMLIT
@@ -140,11 +141,18 @@ if uploaded_files:
     total_clientes = len(clientes_items)
     lotes = [clientes_items[i:i + lote_size] for i in range(0, total_clientes, lote_size)]
 
-    # Generar un ZIP por cada lote
+    # Generar un ZIP por cada lote con barra de progreso + checklist
     for idx, lote in enumerate(lotes, start=1):
+        st.subheader(f"📦 Procesando Lote {idx} ({len(lote)} clientes)")
+
+        progress_text = f"Unificando demandas del Lote {idx}..."
+        progress_bar = st.progress(0, text=progress_text)
+        checklist_container = st.container()
+
         with tempfile.NamedTemporaryFile(delete=False) as tmp_zip:
             with zipfile.ZipFile(tmp_zip, "w") as zipf:
-                for cedula, info in lote:
+                total_carp = len(lote)
+                for i, (cedula, info) in enumerate(lote, start=1):
                     carpeta_cliente = f"{cedula}_{info['nombre']}"
                     os_path = f"{carpeta_cliente}/"
 
@@ -167,9 +175,21 @@ if uploaded_files:
                     nombre_unificado = f"{cedula}_{info['nombre']}_DEMANDAUNIFICADA.pdf"
                     zipf.writestr(os_path + nombre_unificado, unificado_bytes.read())
 
+                    # 🔹 Actualizar barra de progreso
+                    porcentaje = int(i / total_carp * 100)
+                    progress_bar.progress(
+                        porcentaje,
+                        text=f"{progress_text} {porcentaje}% ({i}/{total_carp} clientes)"
+                    )
+
+                    # 🔹 Mostrar checklist dinámico
+                    with checklist_container:
+                        st.write(f"✅ Carpeta procesada: **{carpeta_cliente}**")
+
             with open(tmp_zip.name, "rb") as f:
                 zip_data = f.read()
 
+        st.success(f"🎉 Lote {idx} completado con éxito ✅")
         st.download_button(
             f"📥 Descargar ZIP - Lote {idx} ({len(lote)} clientes)",
             data=zip_data,
@@ -188,7 +208,6 @@ if uploaded_files:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="descargar_excel_global"
     )
-import time
 
 # ------------------------
 # FASE 2: ENVÍO DE DEMANDAS
